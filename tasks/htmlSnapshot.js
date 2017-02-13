@@ -6,9 +6,9 @@
  */
 (function() {
 
-'use strict';
+  'use strict';
 
-module.exports = function(grunt) {
+  module.exports = function(grunt) {
 
     var fs          = require("fs"),
         path        = require("path"),
@@ -18,111 +18,112 @@ module.exports = function(grunt) {
 
     grunt.registerMultiTask('htmlSnapshot','fetch html snapshots', function(){
 
-        var options = this.options({
-          urls: [],
-          msWaitForPages: 500,
-          fileNamePrefix: 'snapshot_',
-          sanitize: function(requestUri) {
-            return requestUri.replace(/#|\/|\!/g, '_');
+      var options = this.options({
+        urls: [],
+        msWaitForPages: 500,
+        fileNamePrefix: 'snapshot_',
+        sanitize: function(requestUri) {
+          return requestUri.replace(/#|\/|\!/g, '_');
+        },
+        snapshotPath: '',
+        sitePath: '',
+        removeScripts: false,
+        removeLinkTags: false,
+        removeMetaTags: false,
+        replaceStrings: [],
+        haltOnError: true,
+        pageOptions: {}
+      });
+
+      // the channel prefix for this async grunt task
+      var taskChannelPrefix = "" + new Date().getTime();
+
+      var sanitizeFilename = options.sanitize;
+
+      var isLastUrl = function(url){
+        return options.urls[options.urls.length - 1] === url;
+      };
+
+      phantom.on(taskChannelPrefix + ".error.onError", function (msg, trace) {
+        if (options.haltOnError) {
+          phantom.halt();
+          grunt.log.writeln(trace);
+          grunt.warn('error: ' + msg, 6);
+        } else {
+          grunt.log.writeln(msg);
+        }
+      });
+
+      phantom.on(taskChannelPrefix + ".console", function (msg, trace) {
+        grunt.log.writeln(msg);
+      });
+
+      phantom.on(taskChannelPrefix + ".htmlSnapshot.pageReady", function (msg, url) {
+        var plainUrl = url.replace(sitePath, '');
+
+        var fileName =  options.snapshotPath +
+            options.fileNamePrefix +
+            sanitizeFilename(plainUrl) +
+            '.html';
+
+        if (options.removeScripts){
+          msg = msg.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        }
+
+        if (options.removeLinkTags){
+          msg = msg.replace(/<link\s.*?(\/)?>/gi, '');
+        }
+
+        if (options.removeMetaTags) {
+          msg = msg.replace(/<meta\s.*?(\/)?>/gi, '');
+        }
+
+        options.replaceStrings.forEach(function(obj) {
+          var key = Object.keys(obj);
+          var value = obj[key];
+          var regex = new RegExp(key, 'g');
+          msg = msg.replace(regex, value);
+        });
+
+        grunt.file.write(fileName, msg);
+        grunt.log.writeln(fileName, 'written');
+        phantom.halt();
+
+        isLastUrl(plainUrl) && done();
+      });
+
+      var done = this.async();
+
+      var urls = options.urls;
+      var sitePath = options.sitePath;
+
+      grunt.util.async.forEachSeries(urls, function(url, next) {
+
+        phantom.spawn(sitePath + url, {
+          // Additional PhantomJS options.
+          options: {
+            phantomScript: asset('phantomjs/bridge.js'),
+            msWaitForPages: options.msWaitForPages,
+            bodyAttr: options.bodyAttr,
+            cookies: options.cookies,
+            taskChannelPrefix: taskChannelPrefix,
+            pageOptions: options.pageOptions
           },
-          snapshotPath: '',
-          sitePath: '',
-          removeScripts: false,
-          removeLinkTags: false,
-          removeMetaTags: false,
-          replaceStrings: [],
-          haltOnError: true,
-          pageOptions: {}
-        });
-
-        // the channel prefix for this async grunt task
-        var taskChannelPrefix = "" + new Date().getTime();
-
-        var sanitizeFilename = options.sanitize;
-
-        var isLastUrl = function(url){
-            return options.urls[options.urls.length - 1] === url;
-        };
-
-        phantom.on(taskChannelPrefix + ".error.onError", function (msg, trace) {
-            if (options.haltOnError) {
-                phantom.halt();
-                grunt.warn('error: ' + msg, 6);
-            } else {
-                grunt.log.writeln(msg);
+          // Complete the task when done.
+          done: function (err) {
+            if (err) {
+              // If there was an error, abort the series.
+              done();
             }
-        });
-
-        phantom.on(taskChannelPrefix + ".console", function (msg, trace) {
-            grunt.log.writeln(msg);
-        });
-
-        phantom.on(taskChannelPrefix + ".htmlSnapshot.pageReady", function (msg, url) {
-            var plainUrl = url.replace(sitePath, '');
-
-            var fileName =  options.snapshotPath +
-                            options.fileNamePrefix +
-                            sanitizeFilename(plainUrl) +
-                            '.html';
-
-            if (options.removeScripts){
-                msg = msg.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+            else {
+              // Otherwise, process next url.
+              next();
             }
-
-            if (options.removeLinkTags){
-                msg = msg.replace(/<link\s.*?(\/)?>/gi, '');
-            }
-
-            if (options.removeMetaTags) {
-                msg = msg.replace(/<meta\s.*?(\/)?>/gi, '');
-            }
-
-            options.replaceStrings.forEach(function(obj) {
-                var key = Object.keys(obj);
-                var value = obj[key];
-                var regex = new RegExp(key, 'g');
-                msg = msg.replace(regex, value);
-            });
-
-            grunt.file.write(fileName, msg);
-            grunt.log.writeln(fileName, 'written');
-            phantom.halt();
-
-            isLastUrl(plainUrl) && done();
+          }
         });
-
-        var done = this.async();
-
-        var urls = options.urls;
-        var sitePath = options.sitePath;
-
-        grunt.util.async.forEachSeries(urls, function(url, next) {
-
-            phantom.spawn(sitePath + url, {
-                // Additional PhantomJS options.
-                options: {
-                    phantomScript: asset('phantomjs/bridge.js'),
-                    msWaitForPages: options.msWaitForPages,
-                    bodyAttr: options.bodyAttr,
-                    cookies: options.cookies,
-                    taskChannelPrefix: taskChannelPrefix,
-                    pageOptions: options.pageOptions
-                },
-                // Complete the task when done.
-                done: function (err) {
-                    if (err) {
-                        // If there was an error, abort the series.
-                        done();
-                    }
-                    else {
-                        // Otherwise, process next url.
-                        next();
-                    }
-                }
-            });
-        });
-        grunt.log.writeln('running html-snapshot task...hold your horses');
+      });
+      grunt.log.writeln('running html-snapshot task...hold your horses');
     });
-};
+  };
 
 }());
